@@ -4,7 +4,7 @@ const app = express()
 app.use(express.static('public'))
 
 app.get('/', (request, response) => {
-    response.render(__dirname+'index.html')
+    response.render(__dirname+'thezone.html')
 })
 
 const server = app.listen(7000, () => {
