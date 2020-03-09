@@ -33,6 +33,8 @@ function concentricRotatingSquares(canvasContext, time) {
     canvasContext.rotate(-ang)
 }
 
+
+
 function runBackground(canvasContext, bgFunc, timeInc=false) {
     bgFunc(canvasContext, t)
     t++
