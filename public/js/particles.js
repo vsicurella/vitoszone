@@ -1,3 +1,7 @@
+function pointInRect(xIn, yIn, rect=[0, 0, 0, 0]) {
+    return xIn >= rect[0] && yIn >= rect[1] && xIn <= rect[2] && yIn <= rect[3]
+}
+
 class Particle {
     x = 0
     y = 0
@@ -20,15 +24,25 @@ class Mass extends Particle {
         super(originX, originY)
         this.radius = radius
         this.amplitude = amplitude
+        this.maxRadius = this.radius * Math.E
     }
 
-    // TODO: zero value threshold
-    amplitudeAt(ptX, ptY) {
+    boundingBox() {
+        return [this.x - this.maxRadius, this.y - this.maxRadius, this.x + this.maxRadius, this.y + this.maxRadius]
+    }
+
+    amplitudeAt(ptX, ptY, cutoff = true) {
         let sdx = Math.pow(ptX - this.x, 2)
         let sdy = Math.pow(ptY - this.y, 2)
-        let sdr = Math.pow(this.radius, 2) * 2
 
-        return Math.exp(-(sdx/sdr + sdy/sdr))
+        let value = 0
+        // TODO: improve zero thresholding
+        if (Math.sqrt(sdx + sdy) <= this.maxRadius || !cutoff) {
+            let sdr = Math.pow(this.radius, 2) * 2
+            value = this.amplitude * Math.exp(-(sdx/sdr + sdy/sdr))
+        }
+       
+        return value
     }
 
     setAngle(angleIn) {
@@ -47,11 +61,7 @@ class Mass extends Particle {
 
 class Field {
     particles = []
-    constructor(xMin, yMin, xMax, yMax) {
-        this.xMin = xMin
-        this.yMin = yMin
-        this.xMax = xMax
-        this.yMax = yMax
+    constructor() {
     }
 
     get population() {
@@ -62,25 +72,35 @@ class Field {
         return particles[index]
     }
 
-    proportionalX(percentX) {
-        return (this.xMax - this.xMin) * percentX + this.xMin
-    }
-
-    proportionalY(percentY) {
-        return (this.yMax - this.yMin) * percentY + this.yMin    
-    }
-
-    proportionalXY(percentX, percentY) {
-        return [this.proportionalX(percentX), this.proportionalY(percentY)]
+    boundingBox() {
+        let bounds = [0, 0, 0, 0]
+        for (let p of this.particles) {
+            let box = p.boundingBox()
+            let i = 0
+            for (; i < 2; i++)
+                if (bounds[i] > box[i])
+                    bounds[i] = box[i]
+            for (; i < 4; i++)
+                if (bounds[i] < box[i])
+                    bounds[i] = box[i]
+        }
+        return bounds
     }
 
     valueAt(xIn, yIn) {
-        return this.particles.map( part => part.amplitudeAt(xIn, yIn)).reduce( (a, b) => a + b)
-    }
+        let validParticles = []
+        // check if in bounding box of any particles
 
-    valueAtProportion(percentX, percentY) {
-        [w, h] = this.proportionalXY(percentX, percentY)
-        return this.particles.map( part => part.amplitudeAt(w, h)).reduce( (a, b) => a + b)
+        for (let p of this.particles) {
+            let box = p.boundingBox()
+            if (pointInRect(xIn, yIn, box))
+                validParticles.push(p)
+        }
+        
+        if (validParticles.length > 0)
+            return this.particles.map( part => part.amplitudeAt(xIn, yIn)).reduce( (a, b) => a + b)
+        else
+            return 0
     }
 
     addParticle(particleIn) {
@@ -164,10 +184,7 @@ class FieldRender {
 
         for (var row = 0; row < this.h; row++) {
             for (var col = 0; col < this.w; col++) {
-                let yPercent = col / this.h
-                let xPercent = row / this.w
-
-                let value = this.fields.map( (f, ind) => f.valueAtProportion(xPercent, yPercent) * this.fieldScales[ind])
+                let value = this.fields.map( (f, ind) => f.valueAt(col, row) * this.fieldScales[ind])
                                        .reduce( (a, b) => a + b)
                                        * this._renderScaling[0]
                 
@@ -189,30 +206,57 @@ class FieldRender {
 
         for (var row = 0; row < this.h; row++) {
             for (var col = 0; col < this.w; col++) {
-                let yPercent = col / this.h;
-                let xPercent = row / this.w;
+                let r, g, b, a
                 [r, g, b, a] = [0, 0, 0, 1];
                 let color = [r, g, b, a]
                 
                 for (var f = 0; f < this.fields.length; f++) {
                     let field = this.fields[f]
-                    let value = field.valueAtProportion(xPercent, yPercent) * this.fieldScales[f]
-                    let code = this.fieldCodes[f]
-                    if (code < 3) {
-                        color[code] += value * this._renderScaling[code]
-                    } else if (code === 3) {
-                        color[code] *= value * this._renderScaling[code]
+                    if (pointInRect(col, row, field.boundingBox())) { // not a great solution
+                        let value = field.valueAt(col, row) * this.fieldScales[f]
+                        let code = this.fieldCodes[f]
+                        if (code < 3) {
+                            color[code] += value
+                        } else if (code === 3) {
+                            color[code] *= value
+                        }
                     }
                 }
 
                 // add manipulation function arg to incorporate hsv & cmyk?
 
                 for (var c = 0; c < 4; c++) {
-                    imgData.data[index + c] = color[c]
+                    imgData.data[index + c] = color[c] * this._renderScaling[c]
                 }
 
                 index += 4
             }
+        }
+
+        g.putImageData(imgData, 0, 0)
+        return imgData
+    }
+
+    renderRGBAFast(g) {
+        let imgData = g.createImageData(this.w, this.h)
+
+        for (let f = 0; f < this.fields.length; f++) {
+            let index = 0
+            let field = this.fields[f]
+            let box = field.boundingBox()
+
+            for (var row = box[1]; row <= box[3]; row++) {
+                for (var col = box[0]; col <= box[2]; col++) {
+                    let value = field.valueAt(col, row) * this.fieldScales[f]
+                    let code = this.fieldCodes[f]
+                    imgData.data[index + code] = value * this._renderScaling[code]
+                    index += 4
+                }
+            }
+        }
+
+        for (let a = 3; a < imgData.data.length; a+=4) {
+            imgData.data[a] = 255
         }
 
         g.putImageData(imgData, 0, 0)
