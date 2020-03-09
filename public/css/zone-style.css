@@ -41,6 +41,13 @@ div.zone-portal {
   justify-content: center;
 }
 
+#zone-canvas {
+  top: 0;
+  left: 0%;
+  min-width: 100%;
+  min-height: 100%; 
+}
+
 div.zone-msg {
   width: 34%;
   height: 43%;
